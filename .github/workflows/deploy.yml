@@ -19,7 +19,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
@@ -28,9 +28,9 @@ jobs:
 
       - name: Build WebAssembly version
         run: |
-          # 編譯專案，輸出會放在 build/web 目錄
-          # 使用 --build 參數生成靜態網頁
-          python -m pygbag --build .
+          # 清除舊緩存並在無視窗模式下編譯
+          rm -rf build/
+          python -m pygbag --build --no-window .
 
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
