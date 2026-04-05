@@ -71,6 +71,10 @@ C = dict(
 # ── Fonts & Caching ───────────────────────────────────────────────────────────
 @functools.lru_cache(maxsize=64)
 def load_font(size, bold=False):
+    path = resource_path("fonts/NotoSansTC-Regular.ttf")
+    if os.path.exists(path):
+        try: return pygame.font.Font(path, size)
+        except: pass
     for name in ["Microsoft JhengHei", "Arial Unicode MS", "Noto Sans TC"]:
         try: return pygame.font.SysFont(name, size, bold=bold)
         except: continue
@@ -456,8 +460,8 @@ class SimulationRenderer:
     def _load_bg():
         if SimulationRenderer._FRONT_IMG is not None: return
         try:
-            SimulationRenderer._FRONT_IMG = pygame.image.load(resource_path("正面.jpg")).convert()
-            SimulationRenderer._BACK_IMG = pygame.image.load(resource_path("背面.jpg")).convert()
+            SimulationRenderer._FRONT_IMG = pygame.image.load(resource_path("front.jpg")).convert()
+            SimulationRenderer._BACK_IMG = pygame.image.load(resource_path("back.jpg")).convert()
             SimulationRenderer._MAIN_BG = pygame.image.load(resource_path("restaurant_bg.png")).convert()
             SimulationRenderer._ILLUS_IMG = pygame.image.load(resource_path("heimlich_simulator.png")).convert_alpha()
         except: pass

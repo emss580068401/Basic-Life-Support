@@ -28,9 +28,9 @@ jobs:
 
       - name: Build WebAssembly version
         run: |
-          # 清除舊緩存並在無視窗模式下編譯
+          # 清除舊緩存並進行編譯
           rm -rf build/
-          python -m pygbag --build --no-window .
+          python -m pygbag --build .
 
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4

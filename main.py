@@ -83,11 +83,19 @@ PANEL  = ( 22,  22,  42)
 ACCENT = ( 80, 160, 255)
 
 # === 字型 ===
-font_lg = pygame.font.SysFont("Microsoft JhengHei", 54, bold=True)
-font_md = pygame.font.SysFont("Microsoft JhengHei", 34, bold=True)
-font_msg= pygame.font.SysFont("Microsoft JhengHei", 28, bold=True)  # 新增: 訊息專用加大粗體
-font_sm = pygame.font.SysFont("Microsoft JhengHei", 24)
-font_xs = pygame.font.SysFont("Microsoft JhengHei", 18)
+def load_main_font(size, bold=False):
+    path = resource_path("fonts/NotoSansTC-Regular.ttf")
+    if os.path.exists(path):
+        try: return pygame.font.Font(path, size)
+        except: pass
+    # Fallback to system font if physical file missing
+    return pygame.font.SysFont("Microsoft JhengHei", size, bold=bold)
+
+font_lg = load_main_font(54, bold=True)
+font_md = load_main_font(34, bold=True)
+font_msg= load_main_font(28, bold=True)
+font_sm = load_main_font(24)
+font_xs = load_main_font(18)
 
 # === 音效 ===
 current_bgm = "16bit_happy_bg_music.mp3"
