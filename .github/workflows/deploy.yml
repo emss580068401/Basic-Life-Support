@@ -1,0 +1,40 @@
+name: Deploy SoulPress to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pygbag
+
+      - name: Build WebAssembly version
+        run: |
+          # 編譯專案，輸出會放在 build/web 目錄
+          # 使用 --build 參數生成靜態網頁
+          python -m pygbag --build .
+
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: build/web
+          branch: gh-pages # 這是部署的分支
+          clean: true
