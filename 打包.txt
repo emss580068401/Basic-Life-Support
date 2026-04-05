@@ -1,0 +1,5 @@
+cd 'C:\Users\USER\Desktop\SoulPress_Pygame_v1.2'
+
+# SoulPress CPR+AED v2.0 完整資源打包指令 (v1.2 修正版)
+# 修正內容：更新目錄、補齊所有缺失的素材、包含 heimlich_simulator.py 與 fonts 資料夾
+pyinstaller --noconsole --onefile --name SoulPressCPR_v2 --add-data "fonts;fonts" --add-data "heimlich_simulator.py;." --add-data "aed_body.png;." --add-data "aed_icon.png;." --add-data "aed_ui.png;." --add-data "background.png;." --add-data "body1.png;." --add-data "body2.png;." --add-data "bpm_bg.png;." --add-data "emei_aed_bg.png;." --add-data "heimlich_simulator.png;." --add-data "menu_bg.png;." --add-data "restaurant_bg.png;." --add-data "rhy_bg.png;." --add-data "soul1.png;." --add-data "soul2.png;." --add-data "success1.png;." --add-data "success1_win.png;." --add-data "success2.png;." --add-data "success2_win.png;." --add-data "title_logo.png;." --add-data "tutorial_icons.png;." --add-data "fail.wav;." --add-data "hit.wav;." --add-data "success.wav;." --add-data "tie_snd.wav;." --add-data "16bit_happy_bg_music.mp3;." --add-data "Before_The_Stillness.mp3;." --add-data "Steady_Hands_Clear_Path.mp3;." --add-data "back.jpg;." --add-data "front.jpg;." --add-data "正面.jpg;." --add-data "背面.jpg;." main.py
