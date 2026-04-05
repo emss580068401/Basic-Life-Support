@@ -1,0 +1,6 @@
+cd 'C:\Users\USER\Desktop\SoulPress_Pygame_v1'
+
+# SoulPress CPR+AED v2.0 打包指令
+pyinstaller --noconsole --onefile --name SoulPressCPR_v2 --add-data "background.png;." --add-data "aed_icon.png;." --add-data "soul1.png;." --add-data "soul2.png;." --add-data "body1.png;." --add-data "body2.png;." --add-data "success.wav;." --add-data "hit.wav;." --add-data "fail.wav;." --add-data "success1.png;." --add-data "success2.png;." --add-data "success1_win.png;." --add-data "success2_win.png;." --add-data "16bit_happy_bg_music.mp3;." --add-data "tie_snd.wav;." main.py
+
+

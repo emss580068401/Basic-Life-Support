@@ -1,0 +1,661 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+// 新增：異物特性資料庫 (決定總循環次數與難度)
+const OBSTACLES = [
+  { id: 'candy', name: '硬糖果', maxProgress: 12, gradient: 'from-cyan-500 to-cyan-300', shadow: 'shadow-[0_0_10px_rgba(6,182,212,0.8)]' },
+  { id: 'meat', name: '大塊牛排', maxProgress: 21, gradient: 'from-orange-500 to-amber-300', shadow: 'shadow-[0_0_10px_rgba(245,158,11,0.8)]' },
+  { id: 'mochi', name: '黏性麻糬', maxProgress: 30, gradient: 'from-fuchsia-600 to-pink-400', shadow: 'shadow-[0_0_10px_rgba(217,70,239,0.8)]' }
+];
+
+const App = () => {
+  // 遊戲狀態: 'start', 'playing', 'gameover', 'victory'
+  const [gameState, setGameState] = useState('start');
+  const [patientType, setPatientType] = useState('standard'); // 新增：病患類型 'standard', 'pregnant', 'obese'
+  const [obstacle, setObstacle] = useState(OBSTACLES[0]); // 新增：當前阻塞的異物
+  
+  // 大階段: 'back' (背面拍擊), 'front' (正面腹部/胸部衝擊)
+  const [stage, setStage] = useState('back');
+  
+  // 小階段: 'locate' (尋找施力點), 'slap' (拍擊), 'inward' (向內蓄力), 'upward' (向上推擠), 'transition' (過場)
+  const [phase, setPhase] = useState('locate');
+  
+  // 玩家與目標狀態
+  const [oxygen, setOxygen] = useState(100);
+  const [globalProgress, setGlobalProgress] = useState(0); // 更改：全局總排出進度
+  const [slapCount, setSlapCount] = useState(0); // 單輪拍背計數 (0-5)
+  const [thrustCount, setThrustCount] = useState(0); // 新增：單輪衝擊計數 (0-5)
+  const [power, setPower] = useState(0); // 向內蓄力值 (0-100)
+  const [isCharging, setIsCharging] = useState(false);
+  
+  // 施力點定位 (Y軸)
+  const [targetY, setTargetY] = useState(45); // 預設: 背部肩胛骨間下移至約 45% 高度
+  const [cursorY, setCursorY] = useState(0);
+  const [isSpotFound, setIsSpotFound] = useState(false);
+  
+  // 視覺與回饋
+  const [message, setMessage] = useState('尋找背部施力點：兩肩胛骨之間');
+  const [shake, setShake] = useState(false);
+
+  const gameAreaRef = useRef(null);
+  const powerRef = useRef(0);
+  const chargeIntervalRef = useRef(null);
+  const oxygenIntervalRef = useRef(null);
+
+  // 遊戲迴圈：扣減血氧
+  useEffect(() => {
+    if (gameState === 'playing') {
+      oxygenIntervalRef.current = setInterval(() => {
+        setOxygen((prev) => {
+          if (prev <= 1) {
+            setGameState('gameover');
+            setMessage('患者缺氧昏迷，急救失敗...');
+            return 0;
+          }
+          return prev - 0.15; // 減緩扣血氧速度，給予 10~30 次超長循環足夠的時間
+        });
+      }, 100);
+    } else {
+      clearInterval(oxygenIntervalRef.current);
+    }
+    return () => clearInterval(oxygenIntervalRef.current);
+  }, [gameState]);
+
+  // 蓄力迴圈：更新力量值 (僅用於正面腹部衝擊)
+  useEffect(() => {
+    if (isCharging && phase === 'inward' && stage === 'front') {
+      chargeIntervalRef.current = setInterval(() => {
+        setPower((prev) => {
+          let nextPower = prev + 3;
+          // 蓄力過頭會重置
+          if (nextPower > 100) {
+            triggerFail('用力過猛或未即時向上推！');
+            return 0;
+          }
+          powerRef.current = nextPower;
+          return nextPower;
+        });
+      }, 30);
+    } else {
+      clearInterval(chargeIntervalRef.current);
+    }
+    return () => clearInterval(chargeIntervalRef.current);
+  }, [isCharging, phase, stage]);
+
+  // 鍵盤與滑鼠事件監聽
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (gameState !== 'playing') return;
+
+      if (e.code === 'KeyW' || e.key === 'w' || e.key === 'W') {
+        if (stage === 'front' && phase === 'inward' && isCharging) {
+          // 檢查蓄力是否在完美區間 (70-90)
+          if (powerRef.current >= 70 && powerRef.current <= 90) {
+            triggerThrustSuccess();
+          } else if (powerRef.current < 70) {
+            triggerFail('力道不足，異物未鬆動！');
+          }
+        }
+      }
+    };
+
+    const handleMouseDown = (e) => {
+      if (gameState !== 'playing') return;
+      
+      // 確保是滑鼠左鍵 (button === 0)
+      if (e.button === 0) {
+        // 【背面拍擊階段】
+        if (stage === 'back' && phase === 'slap') {
+          triggerBackSlap();
+        } 
+        // 【正面蓄力階段】
+        else if (stage === 'front' && phase === 'inward' && !isCharging) {
+          setIsCharging(true);
+          setMessage('持續向內壓迫！等待最佳時機...');
+        }
+      }
+    };
+
+    const handleMouseUp = (e) => {
+      if (e.button === 0 && isCharging && stage === 'front') {
+        setIsCharging(false);
+        if (phase === 'inward') {
+          triggerFail('動作中斷！必須一氣呵成');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [gameState, phase, isCharging, stage, slapCount]);
+
+  // 滑鼠尋找施力點
+  const handleMouseMove = (e) => {
+    if (gameState !== 'playing' || phase !== 'locate') return;
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    setCursorY(y);
+
+    // 判斷是否在目標範圍內 (±5%)
+    if (Math.abs(y - targetY) < 5) {
+      setIsSpotFound(true);
+      if (stage === 'back') {
+        setMessage('鎖定背部！準備進行拍背');
+        setTimeout(() => {
+          if (gameState === 'playing' && phase === 'locate') {
+            setPhase('slap');
+            setMessage('連續點擊【滑鼠左鍵】拍打背部 5 次！');
+          }
+        }, 500);
+      } else {
+        setMessage(`鎖定${patientType === 'standard' ? '腹部' : '胸部'}！準備進行衝擊`);
+        setTimeout(() => {
+          if (gameState === 'playing' && phase === 'locate') {
+            setPhase('inward');
+            setMessage('長按【滑鼠左鍵】向內壓迫！');
+          }
+        }, 500);
+      }
+    } else {
+      setIsSpotFound(false);
+      setMessage(stage === 'back' ? '移動滑鼠尋找：兩肩胛骨之間' : `移動滑鼠尋找：${patientType === 'standard' ? '肚臍上方' : '胸骨中下段'}`);
+    }
+  };
+
+  // 拍背邏輯
+  const triggerBackSlap = () => {
+    const newLocalCount = slapCount + 1;
+    const newGlobalProgress = globalProgress + 1;
+    
+    setSlapCount(newLocalCount);
+    setGlobalProgress(newGlobalProgress);
+    setShake(true);
+    setTimeout(() => setShake(false), 150);
+
+    // 判斷是否達到異物總需求進度
+    if (newGlobalProgress >= obstacle.maxProgress) {
+      setGameState('victory');
+      setMessage(`成功排出 ${obstacle.name}！你拯救了一條生命！`);
+    } 
+    // 若總進度未達標，但單輪 5 次拍背已用完，觸發切換至正面
+    else if (newLocalCount >= 5) {
+      setPhase('transition');
+      setMessage(`⚠️ 拍背無效！${obstacle.name} 卡得很緊！`);
+      setTimeout(() => {
+        setStage('front');
+        setPhase('locate');
+        const nextTarget = (patientType === 'pregnant' || patientType === 'obese') ? 55 : 75;
+        setTargetY(nextTarget); 
+        setThrustCount(0); // 重置正面衝擊計數，準備新的一輪
+        setMessage(`切換至正面！尋找施力點：${patientType === 'standard' ? '肚臍上方' : '胸骨中下段'}`);
+      }, 2000);
+    } else {
+      setMessage(`用力拍打！ ( 本輪 ${newLocalCount} / 5 )`);
+    }
+  };
+
+  // 腹部衝擊成功邏輯
+  const triggerThrustSuccess = () => {
+    const newLocalCount = thrustCount + 1;
+    const newGlobalProgress = globalProgress + 1;
+
+    setIsCharging(false);
+    setPower(0);
+    powerRef.current = 0;
+    setThrustCount(newLocalCount);
+    setGlobalProgress(newGlobalProgress);
+    setShake(true);
+    setTimeout(() => setShake(false), 200);
+
+    // 判斷是否達到異物總需求進度
+    if (newGlobalProgress >= obstacle.maxProgress) {
+      setGameState('victory');
+      setMessage(`成功排出 ${obstacle.name}！你拯救了一條生命！`);
+    } 
+    // 若總進度未達標，但單輪 5 次衝擊已用完，觸發切換回背面 (形成無限循環)
+    else if (newLocalCount >= 5) {
+      setPhase('transition');
+      setMessage(`⚠️ 衝擊無效！必須再次切換進行拍背！`);
+      setTimeout(() => {
+        setStage('back');
+        setPhase('locate');
+        setTargetY(45); // 回到背部施力點
+        setSlapCount(0); // 重置拍背計數，準備新的一輪
+        setMessage('切換回背面！尋找施力點：兩肩胛骨之間');
+      }, 2000);
+    } else {
+      setPhase('locate');
+      const baseTarget = (patientType === 'pregnant' || patientType === 'obese') ? 55 : 75;
+      setTargetY(baseTarget + (Math.random() * 8 - 4)); 
+      setMessage(`很好！異物鬆動了，再次尋找${patientType === 'standard' ? '腹部' : '胸部'}施力點！`);
+    }
+  };
+
+  // 失敗懲罰
+  const triggerFail = (reason) => {
+    setIsCharging(false);
+    setPower(0);
+    powerRef.current = 0;
+    setOxygen((prev) => Math.max(0, prev - 8)); // 失敗扣血氧 (微調減少懲罰，對應變長的流程)
+    setPhase('locate');
+    setMessage(`失敗：${reason}`);
+    
+    const gameArea = document.getElementById('game-container');
+    if(gameArea){
+      gameArea.classList.add('bg-red-900', 'bg-opacity-50');
+      setTimeout(() => gameArea.classList.remove('bg-red-900', 'bg-opacity-50'), 300);
+    }
+  };
+
+  const startGame = () => {
+    // 隨機決定病患類型 (50% 一般, 25% 孕婦, 25% 肥胖者)
+    const types = ['standard', 'standard', 'pregnant', 'obese'];
+    const selectedType = types[Math.floor(Math.random() * types.length)];
+    setPatientType(selectedType);
+
+    // 隨機決定異物類型
+    const selectedObstacle = OBSTACLES[Math.floor(Math.random() * OBSTACLES.length)];
+    setObstacle(selectedObstacle);
+
+    setGameState('playing');
+    setStage('back');
+    setPhase('locate');
+    setOxygen(100);
+    setGlobalProgress(0); // 重置全局進度
+    setPower(0);
+    setSlapCount(0);
+    setThrustCount(0);
+    setIsSpotFound(false);
+    setTargetY(45); // 開始於背部肩胛骨間
+    setMessage('移動滑鼠尋找：兩肩胛骨之間');
+    setTimeout(() => {
+      if(gameAreaRef.current) gameAreaRef.current.focus();
+    }, 100);
+  };
+
+  // 渲染階段指示器
+  const renderPhaseIndicator = () => {
+    if (stage === 'back') {
+      return (
+        <div className="flex justify-center space-x-6 mb-8">
+          <div className={`px-8 py-2.5 rounded-full text-sm font-black tracking-widest uppercase transition-all duration-500 ${phase === 'locate' ? 'bg-gradient-to-r from-blue-500 to-cyan-400 text-white shadow-[0_0_30px_rgba(6,182,212,0.6)] scale-110 border border-cyan-300/50' : 'bg-slate-800/80 text-slate-500 border border-slate-700 shadow-inner'}`}>
+            1. 鎖定肩胛骨間
+          </div>
+          <div className={`px-8 py-2.5 rounded-full text-sm font-black tracking-widest uppercase transition-all duration-500 ${phase === 'slap' ? 'bg-gradient-to-r from-orange-600 to-amber-400 text-white shadow-[0_0_30px_rgba(245,158,11,0.6)] scale-110 border border-amber-300/50' : 'bg-slate-800/80 text-slate-500 border border-slate-700 shadow-inner'}`}>
+            2. 連續拍背 5 次
+          </div>
+        </div>
+      );
+    } else {
+      return (
+        <div className="flex justify-center space-x-5 mb-8">
+          <div className={`px-6 py-2.5 rounded-full text-sm font-black tracking-widest uppercase transition-all duration-500 ${phase === 'locate' ? 'bg-gradient-to-r from-blue-500 to-cyan-400 text-white shadow-[0_0_30px_rgba(6,182,212,0.6)] scale-110 border border-cyan-300/50' : 'bg-slate-800/80 text-slate-500 border border-slate-700 shadow-inner'}`}>
+            1. 尋找{patientType === 'standard' ? '腹' : '胸'}部施力點
+          </div>
+          <div className={`px-6 py-2.5 rounded-full text-sm font-black tracking-widest uppercase transition-all duration-500 ${phase === 'inward' ? 'bg-gradient-to-r from-yellow-500 to-amber-400 text-white shadow-[0_0_30px_rgba(245,158,11,0.6)] scale-110 border border-amber-300/50' : 'bg-slate-800/80 text-slate-500 border border-slate-700 shadow-inner'}`}>
+            2. 蓄力壓迫 (左鍵)
+          </div>
+          <div className={`px-6 py-2.5 rounded-full text-sm font-black tracking-widest uppercase transition-all duration-500 ${phase === 'upward' ? 'bg-gradient-to-r from-emerald-500 to-green-400 text-white shadow-[0_0_30px_rgba(52,211,153,0.6)] scale-110 border border-green-300/50' : 'bg-slate-800/80 text-slate-500 border border-slate-700 shadow-inner'}`}>
+            3. 向上推擠 (W鍵)
+          </div>
+        </div>
+      );
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col items-center justify-center p-4 selection:bg-cyan-500/30 relative overflow-hidden">
+      
+      {/* 醫療儀器網格與光暈背景 */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:40px_40px] opacity-30 pointer-events-none z-0"></div>
+      <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] rounded-full bg-blue-900/20 blur-[120px] pointer-events-none z-0"></div>
+      <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] rounded-full bg-emerald-900/10 blur-[120px] pointer-events-none z-0"></div>
+
+      {/* 標題與教學 */}
+      <div className="text-center mb-6 max-w-2xl drop-shadow-2xl relative z-10">
+        <h1 className="text-5xl font-black mb-4 text-transparent bg-clip-text bg-gradient-to-br from-white via-cyan-100 to-blue-400 tracking-tight drop-shadow-[0_2px_10px_rgba(255,255,255,0.2)]">
+          哈姆立克：黃金三分鐘
+        </h1>
+        <div className="flex items-center justify-center space-x-3 text-sm font-bold tracking-wider text-slate-300 bg-slate-900/80 border border-slate-700 py-2.5 px-6 rounded-full inline-flex backdrop-blur-md shadow-2xl">
+          <span className={stage === 'back' ? 'text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.8)]' : ''}>第一步：拍背五次</span>
+          <span className="text-slate-600">➔</span>
+          <span className={stage === 'front' ? 'text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.8)]' : ''}>第二步：腹部衝擊</span>
+        </div>
+      </div>
+
+      {/* 遊戲主視窗 - 全息玻璃擬態質感 */}
+      <div 
+        id="game-container"
+        ref={gameAreaRef}
+        tabIndex="0"
+        className={`relative z-10 w-full max-w-4xl bg-slate-900/70 backdrop-blur-2xl rounded-[2.5rem] shadow-[0_20px_60px_rgba(0,0,0,0.8),inset_0_1px_0_rgba(255,255,255,0.1)] p-8 border outline-none transition-all duration-300
+          ${gameState === 'playing' ? (stage === 'back' ? 'border-orange-500/40 shadow-[0_0_50px_rgba(249,115,22,0.1)]' : 'border-cyan-500/40 shadow-[0_0_50px_rgba(6,182,212,0.15)]') : 'border-slate-700'}
+          ${shake ? 'translate-x-4 -translate-y-2' : ''}
+        `}
+      >
+        {/* 狀態列 - 升級儀表板風格 */}
+        <div className="flex justify-between items-center mb-8 bg-slate-950/80 backdrop-blur-md p-5 rounded-2xl border border-slate-800 shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)]">
+          <div className="w-1/3">
+            <div className="flex justify-between text-[11px] font-black uppercase tracking-widest mb-2">
+              <span className={`${oxygen <= 20 ? 'text-red-500 animate-pulse drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]' : 'text-slate-400'}`}>O₂ 濃度警示</span>
+              <span className="font-mono text-slate-100 text-sm">{Math.max(0, oxygen).toFixed(0)}%</span>
+            </div>
+            <div className={`h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800 shadow-inner ${oxygen <= 20 ? 'ring-2 ring-red-500/50 animate-pulse' : ''}`}>
+              <div 
+                className={`h-full transition-all duration-100 rounded-full shadow-[inset_0_1px_1px_rgba(255,255,255,0.3)] ${oxygen > 50 ? 'bg-gradient-to-r from-emerald-500 to-green-300' : oxygen > 20 ? 'bg-gradient-to-r from-amber-500 to-yellow-300' : 'bg-gradient-to-r from-red-600 to-red-400'}`}
+                style={{ width: `${oxygen}%` }}
+              ></div>
+            </div>
+          </div>
+          
+          <div className="w-1/3 text-center px-4">
+            <div className={`text-xl font-black tracking-widest uppercase ${stage === 'back' ? 'text-orange-400 drop-shadow-[0_0_15px_rgba(249,115,22,0.8)]' : 'text-cyan-400 drop-shadow-[0_0_15px_rgba(6,182,212,0.8)]'}`}>
+              {message}
+            </div>
+          </div>
+
+          <div className="w-1/3">
+             {/* 統一顯示全局進度，不論是在哪個階段 */}
+             <div>
+                <div className="flex justify-between text-[11px] font-black uppercase tracking-widest mb-2">
+                  <span className="text-cyan-400/90 drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]">總進度 ({obstacle.name})</span>
+                  <span className="font-mono text-slate-100 text-sm">{globalProgress} / {obstacle.maxProgress}</span>
+                </div>
+                {/* 針對高達 30 格的進度條進行優化：移除 gap 改用 border 分隔 */}
+                <div className="h-2.5 bg-slate-900 rounded-full overflow-hidden flex border border-slate-800 shadow-inner gap-0 p-[1px]">
+                  {Array.from({ length: obstacle.maxProgress }).map((_, step) => (
+                    <div 
+                      key={`prog-${step}`} 
+                      className={`flex-1 transition-all duration-300 ${globalProgress > step ? `bg-gradient-to-t ${obstacle.gradient} ${obstacle.shadow}` : 'bg-transparent'} ${globalProgress > step && step !== obstacle.maxProgress - 1 ? 'border-r border-black/30' : ''}`}
+                    ></div>
+                  ))}
+                </div>
+             </div>
+          </div>
+        </div>
+
+        {renderPhaseIndicator()}
+
+        {/* 互動區塊 */}
+        <div className="flex justify-center items-stretch h-[28rem] space-x-16">
+          
+          {/* 左側：患者模型 (修飾身體比例，縮窄寬度 w-80 -> w-[17rem]) */}
+          <div 
+            className={`relative w-[17rem] rounded-[3rem] overflow-hidden border border-slate-700/50 cursor-crosshair flex-shrink-0 transition-all duration-700 shadow-[0_20px_50px_rgba(0,0,0,0.5)]
+              ${stage === 'back' ? 'bg-gradient-to-b from-slate-800 via-slate-900 to-black shadow-[inset_0_0_60px_rgba(249,115,22,0.05)]' : 'bg-gradient-to-b from-slate-800 via-slate-900 to-black shadow-[inset_0_0_60px_rgba(6,182,212,0.05)]'}
+            `}
+            onMouseMove={handleMouseMove}
+          >
+            {/* 視角標籤 */}
+            <div className={`absolute top-4 left-1/2 -translate-x-1/2 px-5 py-1.5 rounded-full text-[10px] font-black tracking-[0.2em] z-40 shadow-[0_4px_20px_rgba(0,0,0,0.5)] border border-white/10 uppercase
+              ${stage === 'back' ? 'bg-orange-600/90 text-white backdrop-blur-md' : 'bg-cyan-600/90 text-white backdrop-blur-md'}`}>
+              {stage === 'back' ? '背面視角 (Dorsal)' : '正面視角 (Ventral)'}
+            </div>
+
+            {/* 病患類型標籤 (確保每次隨機結果都明確顯示) */}
+            {patientType === 'standard' ? (
+              <div className="absolute top-12 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full text-[10px] font-black tracking-widest z-40 shadow-lg border border-emerald-500/50 bg-emerald-600/90 text-white backdrop-blur-md uppercase w-max">
+                🟢 一般病患 (需實施腹推)
+              </div>
+            ) : (
+              <div className="absolute top-12 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full text-[10px] font-black tracking-widest z-40 shadow-lg border border-pink-500/50 bg-pink-600/90 text-white backdrop-blur-md uppercase animate-pulse w-max">
+                ⚠️ 特殊病患：{patientType === 'pregnant' ? '孕婦' : '肥胖者'} (需實施胸推)
+              </div>
+            )}
+
+            {/* 精緻化的人體輪廓 (3D 體積感漸層與環境高光) */}
+            <div className="absolute inset-0 pointer-events-none z-0">
+              
+              {/* 頭部 (配合窄版身體縮小比例) */}
+              <div className={`absolute top-4 left-1/2 -translate-x-1/2 w-16 h-20 rounded-[45%] shadow-[inset_-5px_-10px_20px_rgba(0,0,0,0.8),inset_5px_5px_15px_rgba(255,255,255,0.15)] z-20 flex justify-center items-end pb-4 transition-colors duration-700
+                ${stage === 'back' ? 'bg-gradient-to-br from-slate-600 via-slate-700 to-slate-900' : 'bg-gradient-to-br from-slate-500 via-slate-600 to-slate-800'}
+              `}>
+                {stage === 'front' && (
+                  <div className="w-5 h-1.5 bg-slate-900/80 rounded-full shadow-inner border-t border-white/10"></div>
+                )}
+              </div>
+              
+              {/* 脖子 */}
+              <div className={`absolute top-20 left-1/2 -translate-x-1/2 w-8 h-10 shadow-[inset_0_8px_20px_rgba(0,0,0,0.7)] z-10 transition-colors duration-700
+                ${stage === 'back' ? 'bg-gradient-to-b from-slate-800 to-slate-700' : 'bg-gradient-to-b from-slate-700 to-slate-500'}
+              `}></div>
+
+              {/* 軀幹 (改用絕對定位掌控肚臍位置) */}
+              <div className={`absolute inset-x-5 top-[7rem] bottom-[-2rem] rounded-t-[5rem] shadow-[inset_-15px_-10px_40px_rgba(0,0,0,0.8),inset_10px_10px_30px_rgba(255,255,255,0.1),0_-10px_20px_rgba(0,0,0,0.5)] flex flex-col items-center z-10 transition-colors duration-700
+                ${stage === 'back' ? 'bg-gradient-to-br from-slate-600 via-slate-700 to-slate-900' : 'bg-gradient-to-br from-slate-500 via-slate-600 to-slate-800'}
+              `}>
+                 {stage === 'back' ? (
+                   <>
+                     <div className="w-[75%] h-24 border-t-[6px] border-slate-500/50 rounded-[50%] mt-8 absolute blur-[2px] shadow-[0_-5px_10px_rgba(255,255,255,0.05)]"></div>
+                     <div className="w-2 h-40 bg-gradient-to-b from-slate-800 via-slate-900 to-black mt-12 rounded-full shadow-[inset_2px_2px_5px_rgba(0,0,0,0.8)] opacity-80"></div>
+                     
+                     {/* 背面視角顯示特殊體型輪廓 */}
+                     {patientType !== 'standard' && (
+                       <div className="absolute top-[40%] w-[90%] h-32 bg-slate-900/40 rounded-full blur-[4px] z-[-1]"></div>
+                     )}
+                   </>
+                 ) : (
+                   <>
+                     {/* 鎖骨與胸肌陰影 */}
+                     <div className="absolute top-6 w-[60%] h-5 bg-gradient-to-r from-slate-400/20 via-slate-300/40 to-slate-400/20 rounded-full blur-[1px] shadow-[0_5px_10px_rgba(0,0,0,0.3)]"></div>
+                     <div className="absolute top-20 w-full h-1 bg-gradient-to-r from-transparent via-slate-700/80 to-transparent blur-[1px]"></div> {/* 胸骨下緣 */}
+                     {/* 肚臍凹陷質感 (微調至 72%，完美對應畫面的 75% 施力點之下) */}
+                     <div className="absolute top-[72%] w-3.5 h-3.5 bg-slate-900 rounded-full shadow-[inset_1px_2px_4px_rgba(0,0,0,1),0_1px_1px_rgba(255,255,255,0.2)] border border-slate-800"></div> 
+                     
+                     {/* 孕婦/肥胖者 隆起的腹部輪廓 */}
+                     {patientType !== 'standard' && (
+                       <div className="absolute top-[45%] w-[85%] h-32 bg-gradient-to-b from-slate-400/10 to-slate-800/60 rounded-full blur-[2px] shadow-[0_15px_15px_rgba(0,0,0,0.4),inset_0_10px_10px_rgba(255,255,255,0.05)] border-b border-slate-400/20"></div>
+                     )}
+                   </>
+                 )}
+              </div>
+            </div>
+
+            {/* 整合入人體的 X光氣管透視圖 (高度縮短至符合真實解剖比例) */}
+            <div className="absolute top-[4.5rem] left-1/2 -translate-x-1/2 w-14 h-24 bg-slate-950/60 backdrop-blur-md rounded-full border border-cyan-900/50 shadow-[inset_0_0_20px_rgba(6,182,212,0.1)] flex flex-col justify-end items-center overflow-hidden z-30 pointer-events-none">
+              
+              {/* 氣管軟骨環紋路 (數量配合縮短的高度減少) */}
+              <div className="absolute inset-0 flex flex-col justify-evenly py-2 opacity-50 mix-blend-screen">
+                {[...Array(8)].map((_, i) => (
+                  <div key={i} className="w-full h-[2px] bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent blur-[0.5px]"></div>
+                ))}
+              </div>
+
+              {/* 異物本體 (生化威脅感，依據全局進度上升) */}
+              <div 
+                className={`absolute w-9 h-9 rounded-full transition-all duration-300 ease-out flex items-center justify-center z-20
+                  ${globalProgress >= obstacle.maxProgress ? 'bg-emerald-400 scale-[3] opacity-0 -translate-y-32' : 'bg-fuchsia-900 shadow-[0_0_30px_rgba(217,70,239,0.8),inset_0_0_10px_rgba(0,0,0,0.8)] border border-fuchsia-400'}
+                  ${shake && stage === 'back' ? 'translate-y-2' : ''} 
+                `}
+                style={{
+                  bottom: globalProgress >= obstacle.maxProgress ? '100%' : `${(globalProgress / obstacle.maxProgress) * 75 + 10}%`, 
+                }}
+              >
+                <div className={`w-4 h-4 bg-gradient-to-br from-fuchsia-300 to-fuchsia-600 rounded-full shadow-[0_0_10px_rgba(255,255,255,0.5)] ${globalProgress < obstacle.maxProgress ? 'animate-pulse' : ''}`}></div>
+              </div>
+              
+              {/* 底部高壓氣流特效 (噴射感，從深處的橫膈膜湧上) */}
+              <div className={`absolute -bottom-24 w-[300%] h-48 bg-gradient-to-t from-cyan-400 via-blue-500/60 to-transparent blur-2xl transition-all duration-100 z-0 mix-blend-screen
+                ${isCharging && stage === 'front' ? 'opacity-100 translate-y-0 scale-y-125' : 'opacity-0 translate-y-10'}
+              `}></div>
+            </div>
+
+            {/* 目標施力點 (locate 階段半透明提示網格) */}
+            {phase === 'locate' && (
+              <div 
+                className={`absolute w-full opacity-30 pointer-events-none z-10 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.1)_25%,rgba(255,255,255,0.1)_50%,transparent_50%,transparent_75%,rgba(255,255,255,0.1)_75%,rgba(255,255,255,0.1)_100%)] bg-[length:10px_10px]
+                ${stage === 'back' ? 'h-24 border-y border-orange-500/50' : 'h-14 border-y border-cyan-500/50'}`}
+                style={{ top: `${targetY}%`, transform: 'translateY(-50%)' }}
+              ></div>
+            )}
+
+            {/* 玩家游標掃描線 */}
+            {gameState === 'playing' && phase === 'locate' && (
+              <div 
+                className={`absolute w-full h-[2px] pointer-events-none transition-colors z-40 ${isSpotFound ? 'bg-emerald-400 shadow-[0_0_20px_#34d399]' : 'bg-red-500 shadow-[0_0_15px_#ef4444]'}`}
+                style={{ top: `${cursorY}%` }}
+              >
+                <div className="absolute inset-0 bg-white/50 blur-[2px]"></div>
+                <div className={`absolute -right-5 top-1/2 -translate-y-1/2 w-0 h-0 border-y-[8px] border-y-transparent border-l-[10px] ${isSpotFound ? 'border-l-emerald-400 drop-shadow-[0_0_8px_#34d399]' : 'border-l-red-500'}`}></div>
+                <div className={`absolute -left-5 top-1/2 -translate-y-1/2 w-0 h-0 border-y-[8px] border-y-transparent border-r-[10px] ${isSpotFound ? 'border-r-emerald-400 drop-shadow-[0_0_8px_#34d399]' : 'border-r-red-500'}`}></div>
+              </div>
+            )}
+
+            {/* 施力點鎖定標記 (高階科幻瞄準鏡) */}
+            {phase !== 'locate' && phase !== 'transition' && (
+              <div 
+                className={`absolute left-1/2 -translate-x-1/2 flex items-center justify-center rounded-full transition-all duration-100 z-40
+                  ${stage === 'back' ? 'w-32 h-32 border border-orange-500/40 bg-orange-500/5 shadow-[0_0_40px_rgba(249,115,22,0.4)]' : 'w-24 h-24 border border-emerald-500/40 bg-emerald-500/5 shadow-[0_0_40px_rgba(52,211,153,0.4)]'}
+                `}
+                style={{ top: `${targetY}%`, transform: `translate(-50%, -50%) ${isCharging || phase==='slap' ? 'scale(0.8) rotate(45deg)' : 'scale(1) rotate(0deg)'}` }}
+              >
+                {/* 科技感刻度 */}
+                <div className={`absolute inset-0 rounded-full border-[3px] border-dashed animate-spin-slow ${stage === 'back' ? 'border-orange-500/50' : 'border-emerald-500/50'}`}></div>
+                <div className={`absolute inset-2 rounded-full border border-t-2 animate-reverse-spin ${stage === 'back' ? 'border-orange-400/80' : 'border-emerald-400/80'}`}></div>
+                
+                <div className={`rounded-full shadow-[0_0_15px_rgba(255,255,255,0.8)] ${stage === 'back' ? 'w-8 h-8 bg-gradient-to-br from-orange-200 to-orange-600' : 'w-5 h-5 bg-gradient-to-br from-emerald-200 to-emerald-600'}`}></div>
+              </div>
+            )}
+          </div>
+
+          {/* 右側：蓄力槽與操作提示 */}
+          <div className="flex flex-col w-56 justify-end">
+            
+            {stage === 'front' ? (
+              <>
+                <div className="text-center mb-3 font-black text-slate-400 text-[10px] tracking-[0.2em] uppercase">{patientType === 'standard' ? '腹部' : '胸部'}壓迫力道監測</div>
+                <div className="relative h-full w-20 mx-auto bg-slate-950/80 backdrop-blur-xl rounded-full border border-slate-700 shadow-[inset_0_10px_30px_rgba(0,0,0,0.9)] overflow-hidden">
+                  
+                  {/* 完美蓄力區間 (雷射感) */}
+                  <div className="absolute w-full bottom-[70%] h-[20%] bg-gradient-to-b from-emerald-500/20 via-emerald-400/30 to-emerald-500/20 border-y-2 border-emerald-400 z-10 flex items-center justify-center flex-col backdrop-blur-[2px] shadow-[0_0_20px_rgba(52,211,153,0.3)]">
+                    <span className="text-[10px] font-black tracking-widest text-emerald-200 drop-shadow-[0_0_8px_rgba(52,211,153,1)]">PERFECT</span>
+                    <span className="text-sm font-black text-white drop-shadow-lg mt-0.5 animate-pulse">W</span>
+                  </div>
+
+                  {/* 動態力量條 (液體能量感) */}
+                  <div 
+                    className={`absolute bottom-0 w-full transition-all duration-75 z-0 rounded-t-full
+                      ${power >= 70 && power <= 90 ? 'bg-gradient-to-t from-emerald-600 via-green-400 to-emerald-300 shadow-[0_-10px_30px_#34d399]' : power > 90 ? 'bg-gradient-to-t from-red-800 via-red-600 to-red-400 shadow-[0_-10px_30px_#ef4444]' : 'bg-gradient-to-t from-amber-700 via-orange-500 to-yellow-300'}
+                    `}
+                    style={{ height: `${power}%` }}
+                  >
+                    <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.4)_0%,transparent_20%)]"></div>
+                  </div>
+                  
+                  {/* 玻璃反光高光 */}
+                  <div className="absolute top-2 right-2 bottom-2 w-2.5 bg-gradient-to-b from-white/30 to-transparent rounded-full blur-[2px]"></div>
+                  <div className="absolute top-2 left-2 bottom-2 w-1 bg-white/10 rounded-full blur-[1px]"></div>
+                </div>
+
+                {/* 動態按鍵提示 */}
+                <div className="mt-8 text-center space-y-4">
+                  <div className={`p-3 rounded-2xl border backdrop-blur-md transition-all duration-300 ${phase === 'inward' && !isCharging ? 'border-amber-400/60 text-amber-300 bg-amber-500/10 shadow-[0_0_20px_rgba(245,158,11,0.2)] animate-pulse scale-105' : 'border-slate-800 text-slate-500 bg-slate-900/50'}`}>
+                    <p className="text-xs font-bold mb-1 uppercase tracking-widest">Step 1</p>
+                    長按 <b className="text-slate-100 bg-slate-800 px-2.5 py-1 rounded-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.2),0_2px_5px_rgba(0,0,0,0.5)] border border-slate-600 text-sm">滑鼠左鍵</b> 向內壓
+                  </div>
+                  <div className={`p-3 rounded-2xl border backdrop-blur-md transition-all duration-300 ${power >= 70 && power <= 90 ? 'border-emerald-400/60 text-emerald-300 bg-emerald-500/10 shadow-[0_0_20px_rgba(52,211,153,0.3)] scale-110' : 'border-slate-800 text-slate-500 bg-slate-900/50'}`}>
+                    <p className="text-xs font-bold mb-1 uppercase tracking-widest">Step 2</p>
+                    按下 <b className="text-slate-100 bg-slate-800 px-3 py-1 rounded-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.2),0_2px_5px_rgba(0,0,0,0.5)] border border-slate-600 text-sm">W</b> 向上推擠
+                  </div>
+                </div>
+              </>
+            ) : (
+              // 背面拍擊的操作提示
+              <div className="flex flex-col items-center justify-center h-full">
+                <div className="text-8xl mb-8 drop-shadow-[0_15px_20px_rgba(0,0,0,0.8)] animate-bounce relative">
+                  🤚
+                  <div className="absolute inset-0 bg-orange-500/20 blur-xl rounded-full z-[-1]"></div>
+                </div>
+                <div className={`p-6 w-full text-center rounded-3xl border backdrop-blur-md transition-all duration-300
+                  ${phase === 'slap' ? 'border-orange-500/60 text-orange-300 bg-orange-500/10 shadow-[0_0_30px_rgba(249,115,22,0.2)] scale-105' : 'border-slate-800 text-slate-500 bg-slate-900/50'}
+                `}>
+                  <p className="text-2xl font-black mb-2 tracking-widest">連點左鍵</p>
+                  <p className="text-sm font-bold uppercase opacity-80">給予背部用力拍打</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 遊戲結束/勝利 遮罩層 (高級毛玻璃) */}
+        {gameState !== 'playing' && (
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xl rounded-[2.5rem] flex flex-col items-center justify-center z-50 animate-in fade-in duration-500">
+            <div className="bg-slate-900/90 border border-slate-700/50 p-12 rounded-[2.5rem] shadow-[0_30px_60px_rgba(0,0,0,0.8),inset_0_1px_0_rgba(255,255,255,0.1)] flex flex-col items-center max-w-2xl text-center transform transition-all scale-100 relative overflow-hidden">
+              
+              {/* 背景裝飾光 */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-32 bg-gradient-to-b from-blue-500/10 to-transparent pointer-events-none"></div>
+
+              {gameState === 'start' && (
+                <>
+                  <h2 className="text-4xl font-black mb-8 text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-400 tracking-widest">急救模擬器 <span className="text-cyan-500">v2.0</span></h2>
+                  <div className="flex space-x-6 mb-8 text-center text-slate-300 relative z-10">
+                    <div className="bg-slate-800/80 p-6 rounded-3xl border border-orange-500/30 shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
+                      <div className="text-4xl mb-4 drop-shadow-xl">🤚</div>
+                      <div className="font-black text-orange-400 mb-2 tracking-wider">階段一：背面拍擊</div>
+                      <div className="text-sm font-medium text-slate-400">鎖定兩肩胛骨間<br/>連續用力拍背 5 次</div>
+                    </div>
+                    <div className="flex items-center text-3xl text-slate-600 font-black">➔</div>
+                    <div className="bg-slate-800/80 p-6 rounded-3xl border border-emerald-500/30 shadow-[0_10px_30px_rgba(0,0,0,0.5)] relative overflow-hidden">
+                      {/* 新增隨機挑戰提示 */}
+                      <div className="absolute top-0 right-0 bg-pink-600/80 text-[8px] font-black px-2 py-1 rounded-bl-lg text-white">隨機突發事件</div>
+                      <div className="text-4xl mb-4 drop-shadow-xl">✊</div>
+                      <div className="font-black text-emerald-400 mb-2 tracking-wider">階段二：動態衝擊</div>
+                      <div className="text-sm font-medium text-slate-400">依據患者體型切換<br/>執行腹推或胸推</div>
+                    </div>
+                  </div>
+                  
+                  {/* 新增：循環警告提示 */}
+                  <div className="text-center mb-10 text-amber-300 font-black tracking-widest text-sm bg-amber-900/30 py-3 px-8 rounded-full border border-amber-500/30 shadow-inner z-10 relative">
+                    ⚠️ 根據異物頑固程度，可能需要反覆執行多次「拍背 ➔ 衝擊」循環！
+                  </div>
+
+                  <button onClick={startGame} className="relative group px-12 py-5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black tracking-[0.3em] rounded-full text-xl shadow-[0_10px_30px_rgba(6,182,212,0.4)] transition-all hover:scale-105 active:scale-95 border border-cyan-400/50 overflow-hidden cursor-pointer z-50">
+                    <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] pointer-events-none"></div>
+                    <span className="relative z-10 pointer-events-none">開始模擬系統</span>
+                  </button>
+                </>
+              )}
+              
+              {gameState === 'gameover' && (
+                <>
+                  <div className="text-8xl mb-6 drop-shadow-[0_10px_20px_rgba(239,68,68,0.5)] animate-pulse">🚨</div>
+                  <h2 className="text-5xl font-black mb-4 text-transparent bg-clip-text bg-gradient-to-b from-red-400 to-red-600 drop-shadow-md">急救失敗</h2>
+                  <p className="text-slate-300 mb-10 text-xl font-medium">{message}</p>
+                  <button onClick={startGame} className="relative group px-12 py-5 bg-gradient-to-r from-red-700 to-red-600 hover:from-red-600 hover:to-red-500 text-white font-black tracking-widest rounded-full text-xl shadow-[0_10px_30px_rgba(239,68,68,0.4)] transition-all hover:scale-105 active:scale-95 border border-red-500/50 overflow-hidden cursor-pointer z-50">
+                    <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] pointer-events-none"></div>
+                    <span className="relative z-10 pointer-events-none">重新啟動演練</span>
+                  </button>
+                </>
+              )}
+
+              {gameState === 'victory' && (
+                <>
+                  <div className="text-8xl mb-6 drop-shadow-[0_10px_20px_rgba(52,211,153,0.5)]">🏆</div>
+                  <h2 className="text-5xl font-black mb-4 text-transparent bg-clip-text bg-gradient-to-b from-emerald-300 to-emerald-500 drop-shadow-md">急救成功！</h2>
+                  <p className="text-slate-200 mb-10 text-center text-lg font-medium leading-relaxed">
+                    您完美執行了標準循環流程，成功排除 <span className="font-black text-white px-2 py-0.5 bg-slate-800 rounded">{obstacle.name}</span>。<br/>
+                    <span className="text-sm text-amber-200 mt-5 block font-black tracking-wider bg-amber-900/40 py-3 px-6 rounded-xl border border-amber-500/30 shadow-inner">
+                      ⚠️ 實戰提示：若患者失去意識，請立即轉換為 CPR 並撥打 119。
+                    </span>
+                  </p>
+                  <button onClick={startGame} className="relative group px-12 py-5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black tracking-widest rounded-full text-xl shadow-[0_10px_30px_rgba(52,211,153,0.4)] transition-all hover:scale-105 active:scale-95 border border-emerald-400/50 overflow-hidden cursor-pointer z-50">
+                    <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] pointer-events-none"></div>
+                    <span className="relative z-10 pointer-events-none">完成演練</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default App;
