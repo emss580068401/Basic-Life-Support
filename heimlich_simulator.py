@@ -97,8 +97,7 @@ F22 = load_font(48, True); F18 = load_font(38); F15 = load_font(28, True); F13 =
 
 # ── Synthesised Sound & Paths ────────────────────────────────────────────────
 def resource_path(rel):
-    if getattr(sys, 'frozen', False): return os.path.join(sys._MEIPASS, rel)
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), rel)
+    return rel
 
 SOUND_OK = False
 SND_PERFECT = SND_GOOD = SND_FAIL = SND_SUCCESS = SND_ALARM = SND_CHARGE = SND_HOVER = SND_CLICK = None
@@ -459,12 +458,20 @@ class SimulationRenderer:
     @staticmethod
     def _load_bg():
         if SimulationRenderer._FRONT_IMG is not None: return
-        try:
-            SimulationRenderer._FRONT_IMG = pygame.image.load(resource_path("front.jpg")).convert()
-            SimulationRenderer._BACK_IMG = pygame.image.load(resource_path("back.jpg")).convert()
-            SimulationRenderer._MAIN_BG = pygame.image.load(resource_path("restaurant_bg.png")).convert()
-            SimulationRenderer._ILLUS_IMG = pygame.image.load(resource_path("heimlich_simulator.png")).convert_alpha()
-        except: pass
+        def safe_load(path, alpha=False):
+            try:
+                img = pygame.image.load(resource_path(path))
+                return img.convert_alpha() if alpha else img.convert()
+            except Exception as e:
+                print(f"Warning: could not load {path}: {e}")
+                s = pygame.Surface((32, 32), pygame.SRCALPHA if alpha else 0)
+                if not alpha: s.fill((255, 0, 255))
+                return s
+        
+        SimulationRenderer._FRONT_IMG = safe_load("front.jpg")
+        SimulationRenderer._BACK_IMG = safe_load("back.jpg")
+        SimulationRenderer._MAIN_BG = safe_load("restaurant_bg.png")
+        SimulationRenderer._ILLUS_IMG = safe_load("heimlich_simulator.png", True)
     @staticmethod
     def draw_background(surf, g):
         SimulationRenderer._load_bg()

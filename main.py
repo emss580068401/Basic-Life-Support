@@ -2,9 +2,8 @@ import pygame, sys, os, time, math, random, json, functools, asyncio
 from heimlich_simulator import run_heimlich
 
 def resource_path(rel):
-    if getattr(sys, 'frozen', False):
-        return os.path.join(sys._MEIPASS, rel)
-    return os.path.join(os.path.abspath("."), rel)
+    # Web/Pygbag 下直接使用相對路徑最為穩定
+    return rel
 
 pygame.init()
 pygame.mixer.init()
@@ -109,24 +108,34 @@ tie_snd  = pygame.mixer.Sound(resource_path("tie_snd.wav"))
 hit_snd.set_volume(0.7); fail_snd.set_volume(0.6)
 succ_snd.set_volume(0.8); tie_snd.set_volume(0.7)
 
-# === 圖片載入 ===
-bg_orig      = pygame.image.load(resource_path("background.png")).convert()
-aed_orig     = pygame.image.load(resource_path("aed_icon.png")).convert_alpha()
-soul1_o      = pygame.image.load(resource_path("soul1.png")).convert_alpha()
-body1_o      = pygame.image.load(resource_path("body1.png")).convert_alpha()
-succ1_o      = pygame.image.load(resource_path("success1.png")).convert_alpha()
-soul2_o      = pygame.image.load(resource_path("soul2.png")).convert_alpha()
-body2_o      = pygame.image.load(resource_path("body2.png")).convert_alpha()
-succ2_o      = pygame.image.load(resource_path("success2.png")).convert_alpha()
-sw1_o        = pygame.image.load(resource_path("success1_win.png")).convert_alpha()
-sw2_o        = pygame.image.load(resource_path("success2_win.png")).convert_alpha()
-# === 新美術素材 ===
-menu_bg_o    = pygame.image.load(resource_path("menu_bg.png")).convert()
-title_logo_o = pygame.image.load(resource_path("title_logo.png")).convert_alpha()
-tut_icons_o  = pygame.image.load(resource_path("tutorial_icons.png")).convert_alpha()
-rhy_bg_o     = pygame.image.load(resource_path("rhy_bg.png")).convert()
-bpm_bg_o     = pygame.image.load(resource_path("bpm_bg.png")).convert()
-emei_aed_bg_o = pygame.image.load(resource_path("emei_aed_bg.png")).convert()
+# === 圖片載入 (增加安全保護以通過 CI 編譯) ===
+def safe_load(path, alpha=False):
+    try:
+        img = pygame.image.load(resource_path(path))
+        return img.convert_alpha() if alpha else img.convert()
+    except Exception as e:
+        print(f"警告: 無法載入 {path}: {e}")
+        # 回傳一個暫時的小型 Surface 避免程式崩潰
+        s = pygame.Surface((32, 32), pygame.SRCALPHA if alpha else 0)
+        if not alpha: s.fill((255, 0, 255)) # 顯眼的粉紅色代表缺失
+        return s
+
+bg_orig      = safe_load("background.png")
+aed_orig     = safe_load("aed_icon.png", True)
+soul1_o      = safe_load("soul1.png", True)
+body1_o      = safe_load("body1.png", True)
+succ1_o      = safe_load("success1.png", True)
+soul2_o      = safe_load("soul2.png", True)
+body2_o      = safe_load("body2.png", True)
+succ2_o      = safe_load("success2.png", True)
+sw1_o        = safe_load("success1_win.png", True)
+sw2_o        = safe_load("success2_win.png", True)
+menu_bg_o    = safe_load("menu_bg.png")
+title_logo_o = safe_load("title_logo.png", True)
+tut_icons_o  = safe_load("tutorial_icons.png", True)
+rhy_bg_o     = safe_load("rhy_bg.png")
+bpm_bg_o     = safe_load("bpm_bg.png")
+emei_aed_bg_o = safe_load("emei_aed_bg.png")
 
 def sscale(img, s):
     return pygame.transform.smoothscale(img,
